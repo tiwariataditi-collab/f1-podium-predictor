@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+
+# Environments
+.venv/
+venv/
+env/
+.env
+
+# Generated artifacts
+data/raw/
+data/processed/
+models/
+reports/
+outputs/
+logs/
+*.joblib
+*.pkl
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.vscode/settings.json
