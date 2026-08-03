@@ -1,0 +1,10 @@
+project:
+  name: F1 Podium Predictor
+
+paths:
+  raw_data: data/raw
+  processed_data: data/processed
+  models: models
+  reports: reports
+  outputs: outputs
+  logs: logs
