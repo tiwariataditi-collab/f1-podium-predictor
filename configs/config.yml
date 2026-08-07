@@ -1,10 +1,66 @@
 project:
   name: F1 Podium Predictor
+  random_state: 42
 
-paths:
-  raw_data: data/raw
-  processed_data: data/processed
-  models: models
-  reports: reports
-  outputs: outputs
-  logs: logs
+data:
+  raw_dir: data/raw
+  processed_dir: data/processed
+  train_path: data/processed/train.csv
+  test_path: data/processed/test.csv
+
+  required_files:
+    - races.csv
+    - results.csv
+    - drivers.csv
+    - constructors.csv
+    - qualifying.csv
+    - circuits.csv
+
+features:
+  target: is_podium
+  test_start_year: 2022
+
+  numeric_features:
+    - grid
+    - points
+    - qualifying_position
+    - year
+    - round
+
+  categorical_features:
+    - constructor_name
+    - driver_nationality
+    - constructor_nationality
+    - circuit_country
+
+training:
+  scoring: f1
+  cv: 5
+  tune: true
+
+  models:
+    LogisticRegression: {}
+    RandomForest: {}
+    XGBoost: {}
+
+artifacts:
+  model_dir: models
+
+  model_path: models/best_model.pkl
+
+  legacy_model_path: models/model.pkl
+
+  metrics_path: reports/metrics.json
+
+  model_comparison_path: reports/model_comparison.csv
+
+  feature_importance_path: reports/feature_importance.csv
+
+  figures_dir: reports/figures
+
+  prediction_output_path: outputs/predictions.csv
+
+logging:
+  log_dir: logs
+
+  log_file: logs/project.log
