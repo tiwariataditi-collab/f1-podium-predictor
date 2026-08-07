@@ -18,19 +18,30 @@ class FeatureEngineer:
     def build_model_frame(self, tables: dict[str, pd.DataFrame]) -> pd.DataFrame:
         races = tables["races"][
             ["raceId", "year", "round", "circuitId", "name", "date"]
-        ]
+        ].rename(
+            columns={"name": "race_name"}
+        )
 
         results = tables["results"][
             ["raceId", "driverId", "constructorId", "grid", "positionOrder", "points"]
         ]
 
         drivers = tables["drivers"][
-            ["driverId", "driverRef", "nationality"]
-        ].rename(columns={"nationality": "driver_nationality"})
+            ["driverId", "driverRef", "forename", "surname", "nationality"]
+        ].rename(
+            columns={
+                "nationality": "driver_nationality"
+            }
+        )
 
         constructors = tables["constructors"][
-            ["constructorId", "constructorRef", "nationality"]
-        ].rename(columns={"nationality": "constructor_nationality"})
+            ["constructorId", "constructorRef", "name", "nationality"]
+        ].rename(
+            columns={
+                "name": "constructor_name",
+                "nationality": "constructor_nationality",
+            }
+        )
 
         circuits = tables["circuits"][
             ["circuitId", "circuitRef", "country"]
@@ -67,6 +78,13 @@ class FeatureEngineer:
 
         frame["date"] = pd.to_datetime(frame["date"], errors="coerce")
 
+        frame["driver_name"] = (
+            frame["forename"].fillna("")
+            + " "
+            + frame["surname"].fillna("")
+        ).str.strip()
+
+        
         frame["grid"] = (
             pd.to_numeric(frame["grid"], errors="coerce")
             .replace(0, np.nan)
@@ -144,18 +162,23 @@ class FeatureEngineer:
                 .astype(str)
             )
 
-        columns = (
+        required_columns = (
             ID_COLUMNS
             + [self.feature_config.target]
             + self.feature_config.model_features
         )
 
+        missing = [col for col in required_columns if col not in frame.columns]
+
+        if missing:
+            raise ValueError(f"Missing columns: {missing}")
+
         self.logger.info(
             "Feature frame created with shape %s",
-            frame[columns].shape,
+            frame[required_columns].shape,
         )
 
-        return frame[columns]
+        return frame[required_columns]
 
 if __name__ == "__main__":
 
