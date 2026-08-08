@@ -15,9 +15,7 @@ env/
 # Generated artifacts
 data/raw/
 data/processed/
-models/
-reports/
-outputs/
+models/*.pkl
 logs/
 *.joblib
 *.pkl
