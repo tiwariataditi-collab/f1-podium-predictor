@@ -36,12 +36,18 @@ features:
 training:
   scoring: f1
   cv: 5
-  tune: true
+  tune: false
 
   models:
-    LogisticRegression: {}
-    RandomForest: {}
-    XGBoost: {}
+    models:
+    logistic_regression:
+      enabled: true
+
+    random_forest:
+      enabled: true
+
+    gradient_boosting:
+      enabled: true
 
 artifacts:
   model_dir: models
