@@ -1,25 +1,33 @@
 from __future__ import annotations
 
 import json
+import pickle
 from pathlib import Path
 from typing import Any
 
-import joblib
-
-
-def ensure_parent(path: str | Path) -> Path:
-    target = Path(path)
-    target.parent.mkdir(parents=True, exist_ok=True)
-    return target
-
-
-def save_json(data: dict[str, Any], path: str | Path) -> None:
-    ensure_parent(path).write_text(json.dumps(data, indent=2), encoding="utf-8")
-
 
 def save_object(obj: Any, path: str | Path) -> None:
-    joblib.dump(obj, ensure_parent(path))
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    with path.open("wb") as file:
+        pickle.dump(obj, file)
 
 
 def load_object(path: str | Path) -> Any:
-    return joblib.load(path)
+    path = Path(path)
+
+    with path.open("rb") as file:
+        return pickle.load(file)
+
+
+def save_json(data: Any, path: str | Path) -> None:
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    with path.open("w", encoding="utf-8") as file:
+        json.dump(
+            data,
+            file,
+            indent=4,
+        )
