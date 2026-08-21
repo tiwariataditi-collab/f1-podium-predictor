@@ -4,11 +4,7 @@ from dataclasses import dataclass
 from typing import Any
 
 import pandas as pd
-
-from sklearn.ensemble import (
-    GradientBoostingClassifier,
-    RandomForestClassifier,
-)
+from sklearn.ensemble import GradientBoostingClassifier, RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import (
     average_precision_score,
@@ -19,6 +15,7 @@ from sklearn.metrics import (
 )
 from sklearn.model_selection import GridSearchCV
 from sklearn.pipeline import Pipeline
+from xgboost import XGBClassifier
 
 from src.f1_podium_prediction.configuration import AppConfig
 from src.f1_podium_prediction.logger import get_logger
@@ -34,48 +31,30 @@ class TrainedModelResult:
 
 
 class ModelTrainer:
+    """Train multiple models, compare their performance, and save the best one."""
 
-    def __init__(
-        self,
-        config: AppConfig,
-        preprocessor,
-    ) -> None:
-
+    def __init__(self, config: AppConfig, preprocessor) -> None:
         self.config = config
         self.preprocessor = preprocessor
         self.logger = get_logger(__name__)
 
-    # =========================================================
-    # CANDIDATE MODELS
-    # =========================================================
-
-    def _candidate_models(
-        self,
-    ) -> dict[str, tuple[Any, dict[str, list[Any]]]]:
+    def _candidate_models(self) -> dict[str, tuple[Any, dict[str, list[Any]]]]:
+        """Return the models and hyperparameters to evaluate."""
 
         random_state = self.config.project.random_state
 
-        return {
-
+        models = {
             "logistic_regression": (
-
                 LogisticRegression(
                     max_iter=1000,
                     class_weight="balanced",
                     random_state=random_state,
                 ),
-
                 {
-                    "model__C": [
-                        0.2,
-                        1.0,
-                        3.0,
-                    ]
+                    "model__C": [0.2, 1.0, 3.0],
                 },
             ),
-
             "random_forest": (
-
                 RandomForestClassifier(
                     n_estimators=350,
                     min_samples_leaf=4,
@@ -83,137 +62,86 @@ class ModelTrainer:
                     n_jobs=-1,
                     random_state=random_state,
                 ),
-
                 {
-                    "model__max_depth": [
-                        8,
-                        14,
-                        None,
-                    ],
-
-                    "model__min_samples_leaf": [
-                        3,
-                        6,
-                    ],
+                    "model__max_depth": [8, 14, None],
+                    "model__min_samples_leaf": [3, 6],
                 },
             ),
-
             "gradient_boosting": (
-
                 GradientBoostingClassifier(
                     random_state=random_state,
                 ),
-
                 {
-                    "model__learning_rate": [
-                        0.04,
-                        0.08,
-                    ],
-
-                    "model__max_depth": [
-                        2,
-                        3,
-                    ],
+                    "model__learning_rate": [0.04, 0.08],
+                    "model__max_depth": [2, 3],
+                },
+            ),
+            "xgboost": (
+                XGBClassifier(
+                    n_estimators=300,
+                    learning_rate=0.05,
+                    max_depth=3,
+                    subsample=0.8,
+                    colsample_bytree=0.8,
+                    objective="binary:logistic",
+                    eval_metric="logloss",
+                    random_state=random_state,
+                    n_jobs=-1,
+                ),
+                {
+                    "model__n_estimators": [200, 300],
+                    "model__max_depth": [3, 4],
+                    "model__learning_rate": [0.05, 0.1],
                 },
             ),
         }
 
-    # =========================================================
-    # TRAIN + SELECT BEST MODEL
-    # =========================================================
+        return models
 
     def train_and_select(
         self,
         train: pd.DataFrame,
         test: pd.DataFrame,
     ) -> TrainedModelResult:
+        """Train all enabled models, compare them, and select the best model."""
 
-        feature_cfg = self.config.features
+        feature_config = self.config.features
 
-        # -----------------------------------------------------
-        # Split features and target
-        # -----------------------------------------------------
+        X_train = train[feature_config.model_features]
+        y_train = train[feature_config.target]
 
-        X_train = train[
-            feature_cfg.model_features
-        ]
+        X_test = test[feature_config.model_features]
+        y_test = test[feature_config.target]
 
-        y_train = train[
-            feature_cfg.target
-        ]
-
-        X_test = test[
-            feature_cfg.model_features
-        ]
-
-        y_test = test[
-            feature_cfg.target
-        ]
-
-        rows = []
-
+        results = []
         trained_models = {}
 
-        # -----------------------------------------------------
-        # Train each candidate model
-        # -----------------------------------------------------
+        for model_name, (estimator, param_grid) in self._candidate_models().items():
 
-        for (
-            model_name,
-            (estimator, param_grid),
-        ) in self._candidate_models().items():
+            # Check whether this model is enabled in the configuration
+            model_config = self.config.training.models.get(model_name, {})
 
-            # Check config
-            model_config = self.config.training.models.get(
-                model_name,
-                {},
-            )
-
-            if not model_config.get(
-                "enabled",
-                True,
-            ):
-                self.logger.info(
-                    "Skipping disabled model: %s",
-                    model_name,
-                )
-
+            if not model_config.get("enabled", True):
+                self.logger.info("Skipping disabled model: %s", model_name)
                 continue
 
-            self.logger.info(
-                "Starting model: %s",
-                model_name,
-            )
-
-            # -------------------------------------------------
-            # Create pipeline
-            # -------------------------------------------------
+            self.logger.info("Starting training for model: %s", model_name)
 
             pipeline = Pipeline(
                 steps=[
-                    (
-                        "preprocessor",
-                        self.preprocessor,
-                    ),
-                    (
-                        "model",
-                        estimator,
-                    ),
+                    ("preprocessor", self.preprocessor),
+                    ("model", estimator),
                 ]
             )
 
-            # -------------------------------------------------
-            # Hyperparameter tuning
-            # -------------------------------------------------
-
+            # Perform hyperparameter tuning if enabled
             if self.config.training.tune:
-
                 self.logger.info(
-                    "Hyperparameter tuning: %s",
+                    "Performing hyperparameter tuning for: %s",
                     model_name,
                 )
 
-                search = GridSearchCV(
+                grid_search = GridSearchCV(
                     estimator=pipeline,
                     param_grid=param_grid,
                     scoring=self.config.training.scoring,
@@ -222,60 +150,33 @@ class ModelTrainer:
                     verbose=1,
                 )
 
-                search.fit(
-                    X_train,
-                    y_train,
-                )
+                grid_search.fit(X_train, y_train)
 
-                model = search.best_estimator_
+                model = grid_search.best_estimator_
 
                 self.logger.info(
                     "Best parameters for %s: %s",
                     model_name,
-                    search.best_params_,
+                    grid_search.best_params_,
                 )
 
-            # -------------------------------------------------
-            # Normal training
-            # -------------------------------------------------
-
             else:
-
                 self.logger.info(
-                    "Training without tuning: %s",
+                    "Training %s without hyperparameter tuning",
                     model_name,
                 )
 
-                model = pipeline.fit(
-                    X_train,
-                    y_train,
-                )
+                model = pipeline.fit(X_train, y_train)
 
-            # -------------------------------------------------
-            # Predictions
-            # -------------------------------------------------
+            # Get probability predictions for the positive class
+            y_prob = model.predict_proba(X_test)[:, 1]
 
-            y_prob = model.predict_proba(
-                X_test
-            )[:, 1]
+            # Convert probabilities into class predictions
+            y_pred = (y_prob >= 0.5).astype(int)
 
-            y_pred = (
-                y_prob >= 0.5
-            ).astype(int)
-
-            # -------------------------------------------------
-            # Metrics
-            # -------------------------------------------------
-
-            roc_auc = roc_auc_score(
-                y_test,
-                y_prob,
-            )
-
-            avg_precision = average_precision_score(
-                y_test,
-                y_prob,
-            )
+            # Calculate evaluation metrics
+            roc_auc = roc_auc_score(y_test, y_prob)
+            avg_precision = average_precision_score(y_test, y_prob)
 
             precision = precision_score(
                 y_test,
@@ -295,11 +196,8 @@ class ModelTrainer:
                 zero_division=0,
             )
 
-            # -------------------------------------------------
-            # Store results
-            # -------------------------------------------------
-
-            rows.append(
+            # Store model performance
+            results.append(
                 {
                     "model": model_name,
                     "roc_auc": roc_auc,
@@ -310,12 +208,11 @@ class ModelTrainer:
                 }
             )
 
-            trained_models[
-                model_name
-            ] = model
+            trained_models[model_name] = model
 
             self.logger.info(
-                "%s | ROC-AUC=%.4f | AP=%.4f | Precision=%.4f | Recall=%.4f | F1=%.4f",
+                "%s | ROC-AUC: %.4f | AP: %.4f | Precision: %.4f | "
+                "Recall: %.4f | F1: %.4f",
                 model_name,
                 roc_auc,
                 avg_precision,
@@ -324,141 +221,58 @@ class ModelTrainer:
                 f1,
             )
 
-        # =====================================================
-        # CHECK TRAINING RESULTS
-        # =====================================================
-
-        if not rows:
-
+        if not results:
             raise ValueError(
-                "No models were trained. "
-                "Check training.models in config.yml."
+                "No models were trained. Please check the model configuration."
             )
 
-        # -----------------------------------------------------
-        # Create comparison DataFrame
-        # -----------------------------------------------------
-
-        comparison = pd.DataFrame(
-            rows
-        )
-
-        required_columns = [
-            "model",
-            "roc_auc",
-            "average_precision",
-            "precision",
-            "recall",
-            "f1",
-        ]
-
-        missing_columns = [
-            column
-            for column in required_columns
-            if column not in comparison.columns
-        ]
-
-        if missing_columns:
-
-            raise ValueError(
-                f"Missing metric columns: {missing_columns}"
-            )
-
-        # =====================================================
-        # SELECT BEST MODEL
-        # =====================================================
+        # Create a comparison table and rank models by Average Precision
+        comparison = pd.DataFrame(results)
 
         comparison = (
-            comparison
-            .sort_values(
-                by="average_precision",
-                ascending=False,
+                comparison
+                .sort_values(
+                    by="f1",
+                    ascending=False,
+                )
+                .reset_index(drop=True)
             )
-            .reset_index(
-                drop=True
-            )
-        )
 
-        best_model_name = comparison.loc[
-            0,
-            "model",
-        ]
+        # Select the best-performing model
+        best_model_name = comparison.loc[0, "model"]
+        best_model = trained_models[best_model_name]
+        best_score = float(comparison.loc[0,"f1",])
 
-        best_model = trained_models[
-            best_model_name
-        ]
+        self.logger.info("Best Model: %s", best_model_name)
+        self.logger.info("Best F1 Score: %.4f", best_score)
 
-        best_score = float(
-            comparison.loc[
-                0,
-                "average_precision",
-            ]
-        )
-
-        self.logger.info(
-            "============================================"
-        )
-
-        self.logger.info(
-            "Best Model: %s",
-            best_model_name,
-        )
-
-        self.logger.info(
-            "Best Average Precision: %.4f",
-            best_score,
-        )
-
-        self.logger.info(
-            "============================================"
-        )
-
-        # =====================================================
-        # SAVE BEST MODEL
-        # =====================================================
-
+        # Create the model artifact
         artifact = {
             "model": best_model,
-            "features": feature_cfg.model_features,
-            "target": feature_cfg.target,
+            "features": feature_config.model_features,
+            "target": feature_config.target,
             "best_model_name": best_model_name,
-            "comparison": comparison.to_dict(
-                orient="records"
-            ),
+            "comparison": comparison.to_dict(orient="records"),
         }
 
-        save_object(
-            artifact,
-            self.config.artifacts.model_path,
-        )
+        # Save the model in both current and legacy locations
+        save_object(artifact, self.config.artifacts.model_path)
+        save_object(artifact, self.config.artifacts.legacy_model_path)
 
-        save_object(
-            artifact,
-            self.config.artifacts.legacy_model_path,
-        )
+        # Save model comparison results
+        comparison_path = self.config.artifacts.model_comparison_path
+        comparison_path.parent.mkdir(parents=True, exist_ok=True)
+
+        comparison.to_csv(comparison_path, index=False)
 
         self.logger.info(
             "Best model saved to: %s",
             self.config.artifacts.model_path,
         )
 
-        # =====================================================
-        # SAVE MODEL COMPARISON
-        # =====================================================
-
-        self.config.artifacts.model_comparison_path.parent.mkdir(
-            parents=True,
-            exist_ok=True,
-        )
-
-        comparison.to_csv(
-            self.config.artifacts.model_comparison_path,
-            index=False,
-        )
-
         self.logger.info(
             "Model comparison saved to: %s",
-            self.config.artifacts.model_comparison_path,
+            comparison_path,
         )
 
         return TrainedModelResult(
@@ -466,143 +280,4 @@ class ModelTrainer:
             best_score=best_score,
             best_pipeline=best_model,
             comparison=comparison,
-        )
-
-
-# =============================================================
-# TESTING
-# =============================================================
-
-if __name__ == "__main__":
-
-    print("=" * 60)
-    print("MODEL TRAINER TEST")
-    print("=" * 60)
-
-    try:
-
-        from src.f1_podium_prediction.configuration import (
-            load_config,
-        )
-
-        from src.f1_podium_prediction.components.data_transformation import (
-            DataTransformer,
-        )
-
-        # -----------------------------------------------------
-        # Load configuration
-        # -----------------------------------------------------
-
-        config = load_config()
-
-        print("\nConfiguration loaded successfully.")
-
-        # -----------------------------------------------------
-        # Check train/test files
-        # -----------------------------------------------------
-
-        if not config.data.train_path.exists():
-
-            raise FileNotFoundError(
-                f"Train file not found: "
-                f"{config.data.train_path}"
-            )
-
-        if not config.data.test_path.exists():
-
-            raise FileNotFoundError(
-                f"Test file not found: "
-                f"{config.data.test_path}"
-            )
-
-        # -----------------------------------------------------
-        # Load train/test
-        # -----------------------------------------------------
-
-        train = pd.read_csv(
-            config.data.train_path
-        )
-
-        test = pd.read_csv(
-            config.data.test_path
-        )
-
-        print(
-            f"\nTrain Shape: {train.shape}"
-        )
-
-        print(
-            f"Test Shape : {test.shape}"
-        )
-
-        # -----------------------------------------------------
-        # Create preprocessor
-        # -----------------------------------------------------
-
-        transformer = DataTransformer(
-            config.data,
-            config.features,
-        )
-
-        preprocessor = (
-            transformer.get_preprocessor()
-        )
-
-        # -----------------------------------------------------
-        # Create trainer
-        # -----------------------------------------------------
-
-        trainer = ModelTrainer(
-            config,
-            preprocessor,
-        )
-
-        # -----------------------------------------------------
-        # Train models
-        # -----------------------------------------------------
-
-        result = trainer.train_and_select(
-            train,
-            test,
-        )
-
-        # -----------------------------------------------------
-        # Display result
-        # -----------------------------------------------------
-
-        print("\n" + "=" * 60)
-        print("MODEL COMPARISON")
-        print("=" * 60)
-
-        print(
-            result.comparison.to_string(
-                index=False
-            )
-        )
-
-        print(
-            "\nBest Model :",
-            result.best_model_name,
-        )
-
-        print(
-            "Best Score :",
-            round(
-                result.best_score,
-                4,
-            ),
-        )
-
-        print(
-            "\nModel Training Successful!"
-        )
-
-    except Exception as e:
-
-        print(
-            "\nModel Training Failed!"
-        )
-
-        print(
-            f"{type(e).__name__}: {e}"
         )

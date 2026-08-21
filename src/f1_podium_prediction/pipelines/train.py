@@ -136,9 +136,8 @@ def run_training(
         f"{metrics['roc_auc']:.4f}"
     )
 
-    print(f"Average Precision    : "
-        f"{metrics['average_precision']:.4f}"
-    )
+    print(f"Best F1 Score          : "
+      f"{result.best_score:.4f}")
 
     print(f"Model Saved At       : "
         f"{config.artifacts.model_path}"

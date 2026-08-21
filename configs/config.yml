@@ -22,7 +22,6 @@ features:
 
   numeric_features:
     - grid
-    - points
     - qualifying_position
     - year
     - round
@@ -34,20 +33,15 @@ features:
     - circuit_country
 
 training:
-  scoring: f1
+  scoring: average_precision
   cv: 5
-  tune: false
+  tune: true
 
   models:
-    models:
-    logistic_regression:
-      enabled: true
-
-    random_forest:
-      enabled: true
-
-    gradient_boosting:
-      enabled: true
+    logistic_regression: {}
+    random_forest: {}
+    gradient_boosting: {}
+    xgboost: {}
 
 artifacts:
   model_dir: models
