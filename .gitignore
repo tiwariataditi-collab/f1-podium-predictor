@@ -24,3 +24,17 @@ logs/
 .DS_Store
 Thumbs.db
 .vscode/settings.json
+
+# Model artifacts
+models/
+*.pkl
+*.joblib
+
+# Prediction outputs
+outputs/
+
+# Generated reports
+reports/metrics.json
+reports/model_comparison.csv
+reports/feature_importance.csv
+reports/figures/
